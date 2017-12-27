@@ -13,7 +13,6 @@ from logging.handlers import TimedRotatingFileHandler
 
 import sys
 import select
-import time
 try:
     # Python2
     import SocketServer
@@ -21,14 +20,13 @@ except ImportError:
     # Python3
     import socketserver as SocketServer
 
-DATA_DIR = "data"
+import GamestatsDatabase
 
 LOG_DIR = "logs"
 LOG_FILE = True
 LOG_CONSOLE = True
 
 TIMEOUT_IN_SEC = 21.0
-GETPDR_SKIP_DATA_ON_ERROR = True
 
 
 def get_logger():
@@ -62,11 +60,6 @@ g_logger = get_logger()
 
 class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
     """Basic dummy TCP handler."""
-    VALID_FILENAME = \
-        "abcdefghijklmnopqrstuvwxyz" \
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ" \
-        "0123456789" \
-        "+-_ ()[]"
     GAMESTATS_KEYS = [
         b"GameSpy3D",
         b"Industries",
@@ -128,81 +121,6 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
         ls = [bytes(i) for i in ls]
         gs = list(zip(ls[0::2], ls[1::2]))
         return gs[0], gs[1:]
-
-    def get_safe_filename(self, filename):
-        """Return a safe filename."""
-        return ''.join(chr(c) for c in bytearray(filename)
-                       if chr(c) in self.VALID_FILENAME)
-
-    def dummy_get_keydata(self, name, parameters=[], session={}):
-        """Dummy get key data."""
-        try:
-            data = b"".join([b'\\', name, b'\\'])
-            gamename = self.get_safe_filename(session[b"gamename"])
-            gamedir = os.path.join(DATA_DIR, gamename)
-            if not os.path.exists(gamedir):
-                os.makedirs(gamedir)
-
-            key_file = self.get_safe_filename(name) + ".bin"
-            key_filepath = os.path.join(gamedir, key_file)
-            with open(key_filepath, 'rb') as f:
-                self.log_with("Accessed dummy data: " + key_filepath,
-                              parameters, session)
-                data_blocks = f.read().split(b'\x00')
-                if len(data_blocks) > 1 and \
-                   any(block for block in data_blocks[1:]):
-                    self.log_with(key_file + ": data after nul byte!",
-                                  parameters, session, logging.ERROR)
-                data += data_blocks[0]
-        except Exception as e:
-            self.log_with("Can't get dummy data: {}\n -> {}: {}".format(
-                name, type(e).__name__, e
-            ), parameters, session, logging.ERROR)
-            if GETPDR_SKIP_DATA_ON_ERROR:
-                return None
-        return data
-
-    def dummy_get_data(self, parameters=[], session={}):
-        """Dummy get data.
-
-        TODO: Handle dindex, kv, pid, ptype.
-        """
-        data = b''
-        for keys, value in parameters:
-            if keys == b"keys":
-                for key in value.split(b'\x01'):
-                    if not key:
-                        continue
-                    key_data = self.dummy_get_keydata(
-                        key, parameters, session
-                    )
-                    if key_data is None:
-                        return b""
-                    data += key_data
-        return data
-
-    def dummy_set_data(self, parameters=[], session={}):
-        """Dummy set data.
-
-        TODO: Handle dindex, kv, pid, ptype.
-        """
-        try:
-            gamename = self.get_safe_filename(session[b"gamename"])
-            gamedir = os.path.join(DATA_DIR, gamename)
-            if not os.path.exists(gamedir):
-                os.makedirs(gamedir)
-
-            key_values = parameters[parameters.index((b"data", b"")) + 1:]
-            for key, value in key_values:
-                key_file = self.get_safe_filename(key) + ".bin"
-                key_filepath = os.path.join(gamedir, key_file)
-                if not os.path.exists(key_filepath):
-                    with open(key_filepath, "wb") as f:
-                        f.write(value)
-        except Exception as e:
-            self.log_with("Can't save dummy data!\n -> {}: {} |".format(
-                type(e).__name__, e
-            ), parameters, session, logging.ERROR)
 
     def send_lc1(self, parameters=[], session={}):
         r"""Send login challenge 1.
@@ -269,6 +187,18 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
         """
         session.update(parameters)
         # TODO: Replace pauthr with profile id associated to the authtoken
+        try:
+            # Wiimmfi profile id
+            _, profile_id, _, _, _ = session[
+                b"authtoken"
+            ].split(b"|")[0].split(b"/")
+            session.update({
+                b"pauthr": profile_id,
+                b"is_wiimmfi": True
+            })
+        except:
+            # Dummy profile id = 42123
+            self.log("Not a Wiimmfi authtoken", parameters, session)
         pauthr = session.get(b"pauthr", b"42123")
         lid = session.get(b"lid", b"0")
         session.update({
@@ -299,25 +229,27 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
          - data: player data
         """
         session.update(parameters)
-        mod = session.get(b"mod", str(int(time.time())).encode('ascii'))
-        lid = session.get(b"lid", b"0")
-        pid = session.get(b"pid", b"0")
-        data = self.dummy_get_data(parameters, session)
-        length = str(len(data)).encode('ascii')
-        session.update({
-            b"lid": lid,
-            b"mod": mod,
-            b"pid": pid,
-            b"data": data,
-            b"length": length
-        })
+        keys = [key for key in session[b"keys"].split(b"\x01") if key]
+
+        try:
+            getpdr, data, mod = GamestatsDatabase.get_data(
+                session[b"gamename"], session[b"pid"], session[b"dindex"],
+                session[b"ptype"], keys, session.get(b"mod", 0),
+                session.get(b"is_wiimmfi"), session.get(b"pauthr")
+            )
+        except Exception as e:
+            getpdr, data, mod = 0, b"", 0
+            self.log(
+                "GetData: {}".format(str(e)),
+                parameters, session, logging.ERROR
+            )
 
         message = b"".join([
-            b"\\getpdr\\1",
-            b"\\lid\\", lid,
-            b"\\pid\\", pid,
-            b"\\mod\\", mod,
-            b"\\length\\", length,
+            b"\\getpdr\\", str(getpdr).encode("ascii"),
+            b"\\lid\\", session[b"lid"],
+            b"\\pid\\", session[b"pid"],
+            b"\\mod\\", str(mod).encode("ascii"),
+            b"\\length\\", str(len(data)).encode('ascii'),
             b"\\data\\", data,
         ])
         message += message.count(b'\\') % 2 * b"\\" + b"\\final\\"
@@ -335,24 +267,28 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
          - pid: player id
          - mod: modified since
         """
-        session.update(parameters)
-        lid = session.get(b"lid", b"0")
-        mod = session.get(b"mod", str(int(time.time())).encode('ascii'))
-        # TODO: Replace pid with profile id associated to the authtoken
-        pid = session.get(b"pid", b"42123")
-        session.update({
-            b"lid": lid,
-            b"mod": mod,
-            b"pid": pid
-        })
+        data_index = parameters.index((b"data", b""))
+        session.update(parameters[:data_index])
+        key_values = parameters[data_index + 1:]
 
-        self.dummy_set_data(parameters, session)
+        try:
+            setpdr, mod = GamestatsDatabase.set_data(
+                session[b"gamename"], session[b"pid"], session[b"dindex"],
+                session[b"ptype"], session[b"kv"], key_values,
+                session.get(b"is_wiimmfi"), session.get(b"pauthr")
+            )
+        except Exception as e:
+            setpdr, mod = 0, 0
+            self.log(
+                "SetData: {}".format(str(e)),
+                parameters, session, logging.ERROR
+            )
 
         message = b"".join([
-            b"\\setpdr\\1",
-            b"\\lid\\", lid,
-            b"\\pid\\", pid,
-            b"\\mod\\", mod,
+            b"\\setpdr\\", str(setpdr).encode("ascii"),
+            b"\\lid\\", session[b"lid"],
+            b"\\pid\\", session[b"pid"],
+            b"\\mod\\", str(mod).encode("ascii"),
             b"\\final\\"
         ])
         self.log_send("{}".format(message), parameters, session)
@@ -499,6 +435,8 @@ if __name__ == "__main__":
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 29920
     server = SocketServer.ThreadingTCPServer((host, port), GamestatsTCPHandler)
     try:
+        with GamestatsDatabase.WiimmfiGamestatsDatabase() as db:
+            db.init()
         g_logger.log(logging.DEBUG, "Server: {} | Port: {}".format(host, port))
         server.serve_forever()
     except KeyboardInterrupt:
