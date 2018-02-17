@@ -84,7 +84,7 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
 
     def recv(self, size=1024):
         """Receive data."""
-        return self.crypt(self.request.recv(size))
+        return self.request.recv(size)
 
     def log(self, message, parameters=[], session={},
             level=logging.DEBUG):
@@ -420,7 +420,7 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
             if b"\\final\\" not in message:
                 continue
 
-            (command, _), parameters = self.parse(message)
+            (command, _), parameters = self.parse(self.crypt(message))
             if command in HANDLERS:
                 HANDLERS[command](parameters, session)
             else:
