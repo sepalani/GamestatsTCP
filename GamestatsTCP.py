@@ -119,7 +119,7 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
                          data)
             ls.append(b'')
         ls = [bytes(i) for i in ls]
-        gs = list(zip(ls[0::2], ls[1::2]))
+        gs = list(zip(ls[::2], ls[1::2]))
         return gs[0], gs[1:]
 
     def send_lc1(self, parameters=[], session={}):
@@ -144,7 +144,7 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
             b"\\id\\", id,
             b"\\final\\"
         ])
-        self.log_send("{}".format(message), parameters, session)
+        self.log_send(f"{message}", parameters, session)
         return self.send(message)
 
     def send_lc2(self, parameters=[], session={}):
@@ -175,7 +175,7 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
             b"\\id\\", id,
             b"\\final\\"
         ])
-        self.log_send("{}".format(message), parameters, session)
+        self.log_send(f"{message}", parameters, session)
         return self.send(message)
 
     def send_pauthr(self, parameters=[], session={}):
@@ -211,7 +211,7 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
             b"\\lid\\", lid,
             b"\\final\\"
         ])
-        self.log_send("{}".format(message), parameters, session)
+        self.log_send(f"{message}", parameters, session)
         return self.send(message)
 
     def send_getpdr(self, parameters=[], session={}):
@@ -239,10 +239,7 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
             )
         except Exception as e:
             getpdr, data, mod = 0, b"", 0
-            self.log(
-                "GetData: {}".format(str(e)),
-                parameters, session, logging.ERROR
-            )
+            self.log(f"GetData: {str(e)}", parameters, session, logging.ERROR)
 
         message = b"".join([
             b"\\getpdr\\", str(getpdr).encode("ascii"),
@@ -253,7 +250,7 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
             b"\\data\\", data,
         ])
         message += message.count(b'\\') % 2 * b"\\" + b"\\final\\"
-        self.log_send("{}".format(message), parameters, session)
+        self.log_send(f"{message}", parameters, session)
         return self.send(message)
 
     def send_setpdr(self, parameters=[], session={}):
@@ -279,10 +276,7 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
             )
         except Exception as e:
             setpdr, mod = 0, 0
-            self.log(
-                "SetData: {}".format(str(e)),
-                parameters, session, logging.ERROR
-            )
+            self.log(f"SetData: {str(e)}", parameters, session, logging.ERROR)
 
         message = b"".join([
             b"\\setpdr\\", str(setpdr).encode("ascii"),
@@ -291,13 +285,12 @@ class GamestatsTCPHandler(SocketServer.BaseRequestHandler):
             b"\\mod\\", str(mod).encode("ascii"),
             b"\\final\\"
         ])
-        self.log_send("{}".format(message), parameters, session)
+        self.log_send(f"{message}", parameters, session)
         return self.send(message)
 
     def handle_error(self, command, parameters=[], session={}):
         """Handle unknown command."""
-        self.log_recv("{}, unsupported command".format(command),
-                      parameters, session)
+        self.log_recv(f"{command}, unsupported command", parameters, session)
         return
 
     def handle_auth(self, parameters=[], session={}):
@@ -437,7 +430,7 @@ if __name__ == "__main__":
     try:
         with GamestatsDatabase.WiimmfiGamestatsDatabase() as db:
             db.init()
-        g_logger.log(logging.DEBUG, "Server: {} | Port: {}".format(host, port))
+        g_logger.log(logging.DEBUG, f"Server: {host} | Port: {port}")
         server.serve_forever()
     except KeyboardInterrupt:
         g_logger.log(logging.DEBUG, "[Server] Closing...")
