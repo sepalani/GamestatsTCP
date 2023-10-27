@@ -55,11 +55,11 @@ class DummyGamestatsDatabase():
         gamedir = os.path.join(self.PATH, self.get_safe_filename(gamename))
         if not os.path.exists(gamedir):
             os.makedirs(gamedir)
-        key_file = self.get_safe_filename(key) + ".bin"
+        key_file = f"{self.get_safe_filename(key)}.bin"
         key_filepath = os.path.join(gamedir, key_file)
         with open(key_filepath, 'rb') as f:
             data_blocks = f.read().split(b'\x00')
-            if any(block for block in data_blocks[1:]):
+            if any(data_blocks[1:]):
                 # Data after nul byte?
                 pass
             return b"".join([b'\\', key, b'\\', data_blocks[0]])
@@ -89,7 +89,7 @@ class DummyGamestatsDatabase():
         if not os.path.exists(gamedir):
             os.makedirs(gamedir)
         for key, value in key_values:
-            key_file = self.get_safe_filename(key) + ".bin"
+            key_file = f"{self.get_safe_filename(key)}.bin"
             key_filepath = os.path.join(gamedir, key_file)
             if not os.path.exists(key_filepath):
                 with open(key_filepath, "wb") as f:
@@ -138,7 +138,7 @@ class WiimmfiGamestatsDatabase():
         if len(ls) % 2:
             # MUST BE EVEN!
             ls.append(b'')
-        return list(zip(ls[0::2], ls[1::2]))
+        return list(zip(ls[::2], ls[1::2]))
 
     def set_data(self, gamename, pid, dindex, ptype, kv, key_values):
         with closing(self.conn.cursor()) as cursor:
